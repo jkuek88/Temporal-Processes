@@ -1,0 +1,235 @@
+---
+title: "G4016 Lab 3"
+author: "Jonathan Kuek"
+date: "4 December 2015"
+output: word_document
+---
+
+The dataset that I will be using for this analysis is the GSS Panel Data from 2006 to 2010 over 3 seperate waves. The main dependent variable that I am interested in here is "fair", which measures if the respondent thinks that other people would try to take advantage of them if they had a chance. The measurement is weird here as 1 represents "would take advantage of you", 2 represents "would try to be fair" and 3 represents "depends". I have recoded this into a binary variable where 1 is "would try to be fair" and 0 is everything else.  
+
+The independent variables here are age, real respondent income, trust and highest educational achievement. I have recoded trust to be a binary variable where 1 is "most people can be trusted" and 0 is everything else. Also, I have recoded degree to show 1 if the respondent has a degree or higher and 0 otherwise.  
+
+```{r, echo=FALSE}
+library(devtools)
+library(QMSS)
+library(ggplot2)
+library(plyr)
+library(car)
+library(fUnitRoots)
+library(quantmod)
+library(reshape2)
+library(forecast)
+```
+
+#### 1. Create a multivariate time series; perform any interpolations.  
+```{r}
+data <- read.csv("~/Desktop/Columbia Fall Courses/G4016 Temporal Process/Lab/Lab 3/trends-gss.csv")
+
+vars <- c("year", "fair", "degree", "wrkstat", "age", "realrinc", "sex", "trust") 
+sub <- data[, vars]
+
+#Recoding
+sub <- mutate(sub, 
+              fair = ifelse(fair == 2, 1, 0),
+              degree = ifelse(degree >= 3, 1, 0),
+              trust = ifelse(trust == 1, 1, 0),
+              )
+
+# get means by year
+by.year <- aggregate(subset(sub, sel = -year), list(year = sub$year), mean, na.rm = T)
+
+# interpolate for some missing years
+# add the extra years
+by.year[30:40, "year"] <- c(1979, 1981, 1992, 1995, seq(1997, 2009, 2))
+by.year <- arrange(by.year, year)
+
+# make a time series object by.year.ts and interpolate using na.approx
+by.year.ts <- ts(by.year)
+by.year.ts <- na.approx(by.year.ts)
+
+by.year.ts <- as.data.frame(by.year.ts)
+by.year.ts <- mutate(by.year.ts, 
+                     fair_pct = fair*100,
+                     trust_pct = trust*100,
+                     degree_pct = degree*100)
+
+# correlations
+cor.vars <- c("fair_pct", "degree_pct", "realrinc", "age", "trust_pct")
+cor.dat <- by.year.ts[, cor.vars]
+cor(cor.dat, use = "complete")
+```
+Looking at the correlation table, I would infer that other than trust the other three independent variables all have negative correlation with fair. The absolute value of the correlation coefficient for all four independent variables are above 0.6. The highest being close to 0.9.  
+
+#### 2. Graph the relationships between X and Y.  Explain how you think Y should relate to your key Xs.  
+
+My expectations of the relationship between the dependent variables and independent variables is similar to the direction of their correlation. I would expect trust and fair to be positively related, as trust goes up, you are more likely to believe that people would be fair, all else equals.  
+
+I would expect that as age increase, the less you are would believe that people be fair because you would have seen your fair share of people taking advantage of others.  
+
+I would also expect that the more education you recieved, the less you would believe that people would be fair because school is also competitive in a way.  
+
+Lastly, the higher your income, the less you would believe that people would be fair because a higher paying job may indicate a more competitive work environment where fairness is less often seen.
+
+```{r}
+keep.vars <- c("year", "fair_pct", "degree_pct", "realrinc", "trust_pct", "age")
+
+# Use meltMyTS to transform the data to a 3-column dataset containing a column
+# for time, a column for variable names, and a column of values corresponding to
+# the variable names
+
+plot.dat <- meltMyTS(mv.ts.object = by.year.ts, time.var = "year", keep.vars = keep.vars)
+plot.dat
+
+# Use ggMyTS to plot dependent variable and the combination of dependent variable with individual variables
+(g_fair_pct <- ggMyTS(df = plot.dat, varlist = c("fair_pct")))
+(g_trust_pct <- ggMyTS(df = plot.dat, varlist = c("fair_pct", "trust_pct")))
+(g_degreelt50_pct <- ggMyTS(df = plot.dat, varlist = c("fair_pct", "degree_pct")))
+(g_income <- ggMyTS(df = plot.dat, varlist = c("fair_pct", "realrinc")))
+(g_age <- ggMyTS(df = plot.dat, varlist = c("fair_pct", "age")))
+
+```
+
+
+#### 3. Run a simple time series regression, with one X and no trend.  Interpret it.
+
+```{r}
+# OLS regression
+lm.fair <- lm(fair_pct ~ degree_pct, data = by.year.ts)
+summary(lm.fair)
+```
+Each percentage more of people with degrees decrease the belief that people would be fair to you by 0.79 percentage point on average. This is statistically significant at the 0.1% level.
+
+```{r}
+# test for heteroskedasticity
+bptest(lm.fair)
+```
+The null hypothesis here is that there is no heteroscedasticity. We cannot reject the null hypothesis here with a p value of 0.1816 so there is no heteroscedasticity.  
+
+#### 4. Run a time series regression with one X and trend.  Interpret it.  Perform autocorrelation diagnostics.  Explain what you found.
+
+```{r}
+# include year trend
+lm.fair2 <- update(lm.fair, ~ . + year)
+summary(lm.fair2) 
+vif(lm.fair2) 
+```
+Net of the time trend, each percentage more of people with degrees decrease the belief that people would be fair to you by 0.61 percentage point on average. This is only statistically significant at the 10% level.
+
+There is a negative time trend here. For every one year increase, there is a 0.083 percentage point decrease on average for the belief that people would be fair to you, net of other variables.
+
+The VIF here are both around 23 which is way higher than 10, indicating that multicollinearity is most probably present.
+```{r}
+#  autocorrelation test
+e2 <- lm.fair2$resid
+acf(e2, xlim = c(1,8), col = "red", lwd = 2)
+pacf(e2, xlim = c(1,8), col = "red", lwd = 2)
+plot(e2)
+```
+
+Looking at the acf it seems that there might be presence of AR(1).
+
+```{r}
+dwtest(lm.fair2)
+bgtest(lm.fair2)
+```
+Both the above tests have similar null hypoethesis which is that there is no autocorrelation. However the bad news is that with the low p-values of less than 0.01 for both we can reject the null hypothesis at the 0.1% confidence level and conlcude that there is autocorrelation.  
+```{r}
+durbinWatsonTest(lm.fair2, max.lag=3)
+```
+The strongest evidence here is for AR(1).  
+
+#### 5. Consider running a time series regression with many Xs and trend.  Interpret that.  Check VIF.
+
+```{r}
+# add more predictors
+lm.fair3 <- update(lm.fair2, ~ . + age + trust_pct + realrinc)
+summary(lm.fair3)
+```
+According to the model above:  
+Net of the time trend and other factors, each percentage more of people with degrees decrease the belief that people would be fair to you by 0.368 percentage point on average. This is not statistically significant.  
+Net of the time trend and other factors, every year increase in age will increase the belief that people would be fair to you by 1.57 percentage point on average. This is statistically significant at the 5% level.  
+Net of the time trend and other factors, each percentage more trusting you are increases the belief that people would be fair to you by 0.256 percentage point on average. This is not statistically significant.  
+Net of the time trend and other factors, each category increase in real income will decrease the belief that people would be fair to you by 2.094 * e-04 percentage point on average. This is not statistically significant.  
+Net of other factors, each additional year decrease the belief that people would be fair to you by 0.2435 percentage point on average. This is not statistically significant.  
+
+```{r}
+vif(lm.fair3)
+```
+The VIF for degree_pct (~22) and year (~30) are both above 10. While age and trust_pct are below 10 and above 2.5. Only realrinc is below 2.5. The presence of a VIF above 10 means that multicollinearity is most likely present.
+
+```{r}
+e3 <- lm.fair3$resid
+acf(e3, xlim = c(1,8), col = "red", lwd = 2)
+pacf(e3, xlim = c(1,8), col = "red", lwd = 2)
+plot(e3)
+
+# variance inflation factor
+vif(lm.fair3)  
+durbinWatsonTest(lm.fair3, max.lag=2)
+```
+
+#### 6. Run a first differenced time series regression.  Interpret that.  
+```{r}
+by.yearFD <- summarise(data.frame(by.year.ts),
+                       fair_pct = firstD(fair_pct), # using firstD functon from QMSS package
+                       age = firstD(age),
+                       degree_pct = firstD(degree_pct),
+                       trust_pct = firstD(trust_pct),
+                       realrinc = firstD(realrinc),
+                       year = year)
+lm.fair4 <- update(lm.fair2, data = by.yearFD) # can use update to copy a model with a new dataset
+summary(lm.fair4) 
+```
+
+From the above FD model:  
+Net of the time trend, for a one percentage point difference in the percentage of people with at least bachelor degrees or above, there is a decrease of 0.106 percentage points difference of the belief that people are fair. The negative R^2 is not a good thing for the model to have since it means that our model performs worst than the baseline.  
+
+```{r}
+e4 <- lm.fair4$resid
+acf(e4, xlim = c(1,6), col = "red", lwd = 2)
+pacf(e4, xlim = c(1,6), col = "red", lwd = 2)
+```
+
+#### 7. Check your variables for unit roots.  Do some tests.  Interpret them.
+
+I would be running the Dickey-Fuller tests below. The null hypothesis for the DF test is that there is unit root, so ideally we would like to reject the null hypothesis.  
+```{r}
+
+adfTest(by.year.ts[,"fair_pct"], lags = 0, type="ct")
+adfTest(by.year.ts[,"fair_pct"], lags = 4, type="ct")
+```
+We can see that at both lags 0 and 4, the p-values are both not smaller than 0.05 so we cannot reject the null hypothesis and so there is unit root present.  
+```{r}
+# Phillips-Perron test
+PP.test(by.year.ts[,"fair_pct"],lshort=TRUE)
+```
+This is supported also by the Phillips-Peron test with a similar null hypothesis of unit root. The p-value here is 0.09 which is larger than 0.05 and so we cannot reject the null hypothesis as well.  
+
+
+#### 8. Perform an Automatic ARIMA on the residuals from one of your earlier models.  Tell me what it says.
+```{r}
+auto.arima(e2, trace=TRUE)
+auto.arima(e3, trace=TRUE)
+auto.arima(e4, trace=TRUE)
+```
+Running the auto.arima function for all three models yields three different results in this case:  
+For e2, we would end up with an ARIMA (1, 0, 0) model which means it is an AR(1) model.  
+For e3, we would end up with an ARIMA (0, 0, 0) model which is similar to OLS.  
+For 34, we would end up with an ARIMA (0, 0, 1) model which means it is an MA(1) model.
+
+
+#### 9. Run an ARIMA that follows from Step 8.  Interpret that, too.
+
+```{r}
+xvars.fat <- by.year.ts[,c("degree_pct", "year")]
+
+# ARIMA(1,0,0)
+arima.100 <- arima(by.year.ts[,"fair_pct"], order = c(1,0,0), xreg = xvars.fat)
+summary(arima.100)
+
+Box.test(resid(arima.100), lag = 20, type = c("Ljung-Box"), fitdf = 0)
+```
+
+I have chosen to run the first ARIMA model from Step 8, which is an ARIMA (1, 0, 0) model.  
+
+Net of time trend, each percentage more people with bachelor degrees or above will decrease the belief that people are fair by 0.24 percentage points.

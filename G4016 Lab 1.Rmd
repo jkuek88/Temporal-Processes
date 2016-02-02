@@ -1,0 +1,93 @@
+---
+title: "G4016 Lab 1"
+author: "Jonathan Kuek"
+date: "15 October 2015"
+output: html_document
+---
+
+
+
+Using the data on Straits Times Index weekly adjusted closing data
+
+Do remember to install the below packages:  
+install.packages("plyr")
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("QMSS")
+
+```{r}
+library(plyr)
+library(dplyr)
+library(ggplot2)
+library(QMSS)
+```
+
+I am interested in exploring the Singapore stock market over time, with the adjusted closing price of Singapore Straits Times (STI) Index being the dependent variable and time being the independent variable. I also also included the prices of the three local Singapore banks' adjusted closing price into the last part of the analysis.
+
+The data is presented in a weekly format starting from around the beginning of year 2000 because that is the point where all the four datasets overlap. Some changes have been applied to the datasets because it is hard to manipulate the date variable properly, so as the number on the time axis increases it also represents that we are moving towards the present time period.
+
+```{r}
+
+sti <- read.csv("~/Desktop/Columbia Fall Courses/G4016 Temporal Process/Homework 1/STI_Weekly.csv", header = TRUE)
+dbs <- read.csv("~/Desktop/Columbia Fall Courses/G4016 Temporal Process/Homework 1/DBS_Weekly.csv", header = TRUE)
+uob <- read.csv("~/Desktop/Columbia Fall Courses/G4016 Temporal Process/Homework 1/UOB_Weekly.csv", header = TRUE)
+ocbc <- read.csv("~/Desktop/Columbia Fall Courses/G4016 Temporal Process/Homework 1/OCBC_Weekly.csv", header = TRUE)
+
+vars <- c("Date", "Adj.Close")
+sub <- sti[, vars]
+dbs_price <- dbs[, "Adj.Close"]
+uob_price <- uob[, "Adj.Close"]
+ocbc_price <- ocbc[, "Adj.Close"]
+
+sub <- mutate(sub, num = c(1448:1))
+sub <- subset(sub, num > 626)
+sub <- mutate(sub, dbs = dbs_price)
+sub <- mutate(sub, uob = uob_price)
+sub <- mutate(sub, ocbc = ocbc_price)
+sub$num <- c(822:1)
+
+by_week <- ddply(sub, "num", summarise, Price = mean(Adj.Close))
+
+plot(by_week, type = "l", lwd = 2, col = "navyblue", bty = "l")
+ 
+with(by_week, abline(line(num, Price), col = "maroon", lwd = 2, lty = 2))
+```
+
+We can see from the above plot that if we are just at the trend from year 2000 to 2015, we can see a distinct upward trend with one period of large drastic movement around 2008-2009 when the global financial crisis occurred and also recently when the price drops drastically.
+
+```{r}
+lm1 = lm(Adj.Close ~ num, data = sub)
+summary(lm1)
+```
+
+Based on the linear regression model, we can see that at year 2000, the estimate of the price level of the STI Index is around 1589, which is below the actual figure of around 2400. The coefficient of the time variable means that for every one week, the price level of the STI would increase by 2.267.
+
+
+```{r}
+sub$late <- ifelse((sub$num>300), 1, 0)
+lm_sti_two_period = lm(Adj.Close ~ late, data = sub)
+summary(lm_sti_two_period)
+```
+
+I also examined a two period model by looking at when there was a huge spike in the price levels. I chose 2006 (around 300) since it was just before the boom and burst of the global financial crisis and the results I obtained was an intercept of 1800, which means that the average level was 1800 for the period of 2000 to 2006 and then the post 2006 average would be 1800 + 1135 = 2935 all the way till 2015.  
+
+Perhaps it is also interesting to note that if you buy stocks when its below the trend line above and sell them above the trend line it seems like a rather safe way to make positive returns on your investments. I guess this might be true only if you can afford to hold the index for long periods of time without needing to liquidate the investments.
+
+```{r}
+sti_percent <- ((sub$Adj.Close - 2234.92)/2234.92) *100
+dbs_percent <- ((sub$dbs - 15.97)/15.97) *100
+uob_percent <- ((sub$uob - 8.32)/8.32) *100
+ocbc_percent <- ((sub$ocbc - 4.51879)/4.51879) *100
+
+plot(sub$num, sti_percent, xlab = "Time", ylab = "Percentage Change", main = "Singapore Stock Market Analysis", ylim = c(-80,200), col = 1)
+points(sub$num, dbs_percent, col = 2)
+points(sub$num, uob_percent, col = 3)
+points(sub$num, ocbc_percent, col = 4)
+
+```
+
+Lastly, I would like to compare the percentage change of the STI index and that of the three major banks over the last 15 years by benchmarking their price movement to their initial prices at the beginning of year 2000.  
+
+The black line represent the STI index, the red one represents DBS Bank, the green represents UOB bank and the blue represents OCBC Bank. While the banks stock prices also tend to move in the same direction as the STI over the period of 15 years, the magnitude of movement if quite different for DBS and UOB, while OCBC followed the STI closely until after the financial crisis when it also began to diverge.  
+
+The best performing one amongst the four based on this 15 year horizon is UOB bank, which is quite surprising because it is the smallest amongst the 3 banks. The worst performing one is DBS bank which ironically happens to be the largest bank amongst the 3. This might be something interesting worth looking into because all 3 banks are deposit taking and DBS bank has the largest consumer base amongst the three while UOB has the smallest presence. The finanacial crisis in 2008 to 2009 negatively impacted banks who had larger shares of investment banking and institutional sales and trading operations while those who had large consumer banking business fared much better off.

@@ -1,0 +1,104 @@
+---
+title: "G4016 Lab 2 Survival Analysis"
+author: Jonathan Kuek (jjk2214)
+output: pdf_document
+---
+
+Run a multiple variable survival analysis. You can perform the survival analysis either using discrete-time methods (i.e., event history analysis) or you can use Cox proportional hazards methods, either one is fine.  
+ (a) State what your "failure" variable is and how you expect your independent variables to affect it.   
+ (b) Explain how you determined the #risk window" (due to right truncation and left-censoring) and who is eligible for failure over the time you are studying.  
+ (c) Explain whether the results were consistent with your expectations, and do that by interpreting the coefficients from the models, model fit, and so on.
+
+I am using the GSS Panel Data from 2006 to 2010 for this survival analysis. The survival analysis that I will be conducting will be one-off event discrete analysis. The"childs" varaible in the GSS Panel Data measure the number of children that the respondent has that were born alive from past and present marriage.
+
+```{r}
+library("gmodels")
+
+pan <- read.csv("~/Desktop/Columbia Fall Courses/G4016 Temporal Process/Lab/Lab 2/panel-for-R-1.csv.xls")
+vars <- c("age", "year", "sex", "idnum", "panelwave", "educ", "region", "marital", "attend", "childs", "sibs", "income")
+sub <- pan[, vars]
+
+sub$havechild = ifelse(sub$childs==0,0,1)
+
+CrossTable(sub$havechild, sub$year, prop.r=F, prop.c=T, prop.t=F, prop.chisq=F, format="SPSS")
+```
+(a) My "failure" variable is when a respondent has a child. I will sub-code those who have more than one child as having a child and those with no children now as having no child.  
+
+The independent variables that I have included in this study are sex, education, age, religious attendance and race.  
+
+I would expect sex to not have too much of an impact because I would expect that it takes two hands to clap when having a child, however, there might be small impact with females having a more negative impact on the logit coefficient because females have a more limited natural number of child bearing years compared to males.  
+
+I would expect education to have a negative impact on the logit coefficient because I am guessing that as you become more educated, you would also have a stronger desire to have a successful career and children might be a less important concern to you.  
+
+I would expect age to have a negative impact on the logit coeffcient as well because the chances of humans having an offspring is higher when both parents are younger. As we age, the natural chances of conceiving will go down.  
+
+Lastly, I would expect increased religious attendance to have a positive impact on the logit coefficient because from my understanding most religions would emphasize the family unit and that includes having children. 
+
+Also, although we see an increase in the raw percentage of the respodents having a child across time in the cross table, I would guess that time would not have a significant impact on whether the respondent has a child or not and there should not be a time trend.
+
+(b) My risk window for this analysis is the duration of the panel study from 2006 to 2010, with data points from 2006, 2008 and 2010. To control for left censoring, I will remove all respondents who are "dead" to me at the start of 2006, ie they already have one or more children. There is no issue with right censoring and thus no need to control for it. Over the course of the 4 years, respondents might have had children between waves 1 and 2 and waves 2 and 3 and I will also code it to remove them from subsequent years if they have children in between waves 1 and 3. Each respondent can only contribute once to a failure event and once they have a child I will deem them to be "dead" to me.
+
+```{r}
+sub$drop = ifelse(sub$havechild == 1 &  sub$panelwave == 1, 1, 0)
+
+sub = merge(sub, aggregate(drop ~ idnum, data=sub, mean), by="idnum", suffixes=c("", ".all"))
+
+subpt = subset (sub, sub$drop.all == 0)
+
+```
+
+Using the above, I am removing all the respondents who already have a child at the time of the first panel wave by putting all those that do not have a child at the time of the first panel study into a new dataset called "subpt".
+
+```{r}
+subpt$nyear = subpt$year-2006
+
+subpt$ytwo = ifelse(subpt$havechild == 1 & subpt$panelwave == 2, 2, 0)
+
+subpt = merge(subpt, aggregate(ytwo ~ idnum, data=subpt, max), by="idnum", suffixes=c("", ".two"))
+
+subpt$ythree = ifelse(subpt$havechild == 1 & subpt$panelwave == 3, 3, 0)
+
+subpt = merge(subpt, aggregate(ythree ~ idnum, data=subpt, max), by="idnum", suffixes=c("", ".three"))
+
+subpt$combo <- do.call(paste, c(subpt[c("ytwo.two", "ythree.three")], sep = ""))
+
+table(subpt$havechild, subpt$combo)
+```
+Following which, I will now have to examine if there are respondents that had their first child in between waves 1 and 2 and between waves 2 and 3. 
+
+```{r}
+subpt$havechild[subpt$combo == "20" & subpt$year == 2010] <- NA
+
+subpt$havechild[subpt$combo == "23" & subpt$year == 2010] <- NA
+
+table(subpt$havechild, subpt$combo)
+```
+
+After identifying those respondents that have children in between waves, I would have to remove them from subsequent waves with the above codes.
+
+```{r}
+summary(glm(havechild ~ as.factor(nyear), subpt, family="binomial", subset = subpt$year>2006))
+```
+(c) Using the simpliest possible model with just the wave variable, we can see that wave 3 lowers the logit of having a child by -0.31, relative to wave 2. The results are not statistically significant.
+
+
+```{r}
+summary(glm(havechild ~ as.factor(nyear) + sex + educ + age + attend, subpt, family="binomial", subset = subpt$year>2006))
+```
+In the subsequent model, the other independent variables are all included inside the regression model.
+
+For each year older someone becomes, their logit of having a child decreases by 0.024, net of other variables. This is in line with my expectations.  
+
+Relative to males, females have a 0.009 increase in their logit on having a child, net of other variables. This differs from my initial expectation that relative to males, females should have a decrease in their logit, however, since the variable is not statistically significant. It is also supportive of my initial expectations that gender does not an impact on having a child.
+
+For every one year increase in schooling, someone will have a 0.014 decrease in their logit on having a child on average, net of other variables. This is in line with my intial expectations.  
+
+For every one category increase in religious attendance, someone will have a 0.047 increase in their logit on having a child on average, net of other variables. This is also in line with my intiail expectations.  
+
+The only variable significant in this model is age, which might make sense because there is a biological constaint on all of us and there are only so many years we can have a child. Unlike employment, it does not make as much sense to limit the regression to a particular age band because everyone has different number of years where they can have a child biologically and it is also possible for one to have a child at a late age due to technological advances. It might be better for us to consider other independent variables in this case.
+
+Although if we do run a regression while controlling the group for people who are only below 50 years old, the whole model would be statstically insignificant as shown below.
+
+```{r}
+summary(glm(havechild ~ as.factor(nyear) + sex + educ + age + attend, subpt, family="binomial", subset = subpt$year>2006 & subpt$age < 50))
+```

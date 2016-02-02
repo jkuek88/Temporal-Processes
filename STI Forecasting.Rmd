@@ -1,0 +1,90 @@
+---
+title: "Finance Forecasting ARIMA"
+author: "Jonathan Kuek"
+date: "13 December 2015"
+output: html_document
+---
+
+```{r, echo=FALSE}
+library(QMSS)
+library(ggplot2)
+library(plyr)
+library(forecast)
+```
+
+```{r}
+data1 <- read.csv("~/Desktop/Columbia Fall Courses/QMSS Seminar/Datasets/Data/STI.csv")
+
+vars <- c("Date", "Volume", "Adj.Close")
+data1 <- data1[, vars]
+
+STI <- aggregate(subset(data1, sel = -Date), list(day = data1$Date), mean, na.rm = T)
+
+sti_ts <- ts(STI)
+sti_ts <- na.approx(sti_ts)
+summary(sti_ts)
+
+```
+
+```{r}
+# ARIMA (2,0,0)
+arima_data <- cbind(day = sti_ts[, "day"],
+                    price = sti_ts[, "Adj.Close"],
+                    L1.price = lag(sti_ts[, "Adj.Close"], k = -1),
+                    L2.price = lag(sti_ts[, "Adj.Close"], k = -2),
+                    L1.volume = lag(sti_ts[, "Volume"], k = -1),
+                    L2.volume = lag(sti_ts[, "Volume"], k = -2))
+nr <- nrow(arima_data)
+arima_data <- arima_data[-c(nr, nr -1), ]
+
+xvars <- arima_data[, c("L1.price", "L2.price", "L1.volume", "L2.volume")]
+arima_sti <- arima(arima_data[, "price"], order = c(2, 0, 0), xreg = xvars)
+arima_sti
+```
+
+```{r}
+point_forecast <- fitted(arima_sti)
+se <- sqrt(arima_sti$sigma2)
+low_95 <- point_forecast - 1.96 * se
+high_95 <- point_forecast + 1.96 * se
+arima_predictions <- data.frame(arima_data, point_forecast, low_95, high_95)
+```
+
+```{r}
+# ARIMA table
+
+arima_error <- ddply(arima_predictions, "day", summarise,
+                     Price = price,
+                     F = point_forecast,
+                     eF = Price - F,
+                     eF_sq = eF^2)
+round(arima_error, 4)
+```
+
+```{r}
+with(arima_predictions, {
+  plot(day, price, lty = 1)
+  lines(day, low_95, lty = 2)
+  lines(day, high_95, lty = 2)
+  lines(day, point_forecast, col = "blue")
+})
+
+MSFE_arima_sti <- mean(arima_error$eF_sq, na.rm = T)
+round(MSFE_arima_sti, 4)
+```
+
+```{r}
+# Comparing the predictions to a naive model
+arima_error_naive <- ddply(arima_predictions, "day", summarise,
+                     Price = price,
+                     F = L1.price,
+                     eF = Price - F,
+                     eF_sq = eF^2)
+round(arima_error_naive, 4)
+
+MSFE_naive <- mean(arima_error_naive$eF_sq, na.rm = T)
+round(MSFE_naive, 4)
+```
+
+Comparing the raw numbers I would say that the ARIMA (2,0,0) model with closing price and volume is able to give slightly better predictions (MSFE of 565.5) than a naive model (MSFE of 593.8).
+
